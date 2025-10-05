@@ -241,7 +241,7 @@
             updateStatusView(dateKey, newStatus);
             
             // 3. Guardar en Firestore (Nueva llamada)
-            saveDayStatus(dateKey, window.dayStatus[dateKey]);
+            saveDayStatus(dateKey, window.dayStatus[dateKey]); // <-- Esto guarda el progreso
         }
 
         function updateStatusView(dateKey, status) {
@@ -450,7 +450,7 @@
                 if (user) {
                     userId = user.uid;
                     console.log("Authenticated with User ID:", userId);
-                    loadUserData(); // Cargar metas Y estado del calendario
+                    loadUserData(); // <-- Esta función carga los datos guardados del calendario y metas
                     setupInputListeners(); // Adjuntar listeners de objetivos
                 } else {
                     console.error("User is not signed in.");
@@ -509,13 +509,13 @@
                 <!-- Tarjeta 1: Objetivo General (3-6 meses) -->
                 <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-infit-orange shadow-md">
                     <label for="goal-general" class="text-lg font-bold text-infit-orange block mb-2">Objetivo General (3-6 meses)</label>
-                    <input type="text" id="goal-general" value="Ej: Ir a la playa con un 3% menos de grasa corporal." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: Bajar 10 kg, vacaciones, evento especial...">
+                    <input type="text" id="goal-general" value="Ej: Ir a la playa con un 3% menos de grasa corporal." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: Bajar 10 kg, vacaciones, evento especial..." oninput="saveGoal('goal-general')">
                 </div>
 
                 <!-- Tarjeta 2: Objetivo del Mes (Realista) -->
                 <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-infit-orange shadow-md">
                     <label for="goal-monthly" class="text-lg font-bold text-infit-orange block mb-2">Meta del Mes (Sencilla y Realista)</label>
-                    <input type="text" id="goal-monthly" value="Ej: Beber 2.5 litros de agua diarios y dormir 7 horas." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: No comer postre después de las 8pm, 3 litros de agua.">
+                    <input type="text" id="goal-monthly" value="Ej: Beber 2.5 litros de agua diarios y dormir 7 horas." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: No comer postre después de las 8pm, 3 litros de agua..." oninput="saveGoal('goal-monthly')">
                 </div>
             </div>
         </div>
@@ -527,7 +527,7 @@
             </p>
         </div>
         
-        <!-- Sección de INVITACIÓN / REFERIDOS (ACTUALIZADO PARA WHATSAPP) -->
+        <!-- Sección de INVITACIÓN / REFERIDOS (WHATSAPP) -->
         <div class="w-full p-6 mb-10 bg-gray-900 rounded-xl border-l-8 border-infit-orange shadow-lg">
             <h3 class="text-2xl font-bold text-infit-orange mb-3 flex items-center gap-3">
                 <!-- Icono de Usuarios (Lucide Users-2) -->
@@ -535,7 +535,6 @@
                 ¡Inspira a alguien más!
             </h3>
             <p class="text-gray-300 mb-4 text-sm">
-                <!-- TEXTO ACTUALIZADO AQUÍ -->
                 Invita a un amigo o familiar a unirse al programa <strong>"Mi Mejor Versión"</strong> (Planes + L-Carnitina) y <strong>ambos obtengan beneficios especiales 🎁</strong>.
             </p>
             <div class="bg-gray-800 p-4 rounded-lg mb-4">
@@ -544,7 +543,7 @@
                     Personas de nuestra comunidad en <strong>Santa Ana</strong> o en cualquier parte de <strong>Estados Unidos</strong>. ¡Que tu impacto no tenga límites!
                 </p>
             </div>
-            <!-- Botón de Acción - Usa enlace de WhatsApp precargado (MENSAJE ACTUALIZADO) -->
+            <!-- Botón de Acción - Enlace de WhatsApp precargado con el formato solicitado -->
             <a href="https://wa.me/5217751056744?text=Hola%20%F0%9F%91%8B%2C%20soy%20Adriana.%20%0A%0AQuiero%20recomendar%20a%20un%20amigo%2Ffamiliar%20para%20el%20programa%0A%22Mi%20Mejor%20Versi%C3%B3n%22%20%0Ay%20obtener%20los%20beneficios%20%F0%9F%8E%81.%0A%0A%F0%9F%93%B2Este%20es%20su%20nombre%20y%20n%C3%BAmero%0Ade%20contacto%20para%20que%20reciba%20la%20info%3A" 
                target="_blank" 
                class="mt-2 inline-block w-full text-center py-3 px-6 rounded-xl font-bold text-gray-900 bg-infit-orange hover:bg-yellow-600 transition duration-300 transform hover:scale-[1.01] shadow-lg">
