@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INFIT - Dashboard de Hábitos</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Fuente Inter para un estilo moderno y legible */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0d0d;
+            color: #f5f5f5;
+        }
+        /* Definición del color de acento de INFIT */
+        .text-infit-orange { color: #e59902; }
+        .bg-infit-orange { background-color: #e59902; }
+        .border-infit-orange { border-color: #e59902; }
+        /* Estilo base para las celdas del calendario */
+        .calendar-day {
+            /* Ajuste responsivo de altura */
+            min-height: 80px; /* Base para móvil */
+            @media (min-width: 640px) { /* sm breakpoint */
+                min-height: 100px;
+            }
+            /* Se ha ajustado 'flex-col justify-between' para que el seguimiento diario esté al fondo */
+            @apply flex flex-col justify-between p-2 rounded-lg text-xs transition-all duration-300 cursor-pointer; 
+        }
+        /* Estilos específicos */
+        .day-reminder {
+            /* Reto de Eliminación (Domingo) */
+            @apply bg-red-700 bg-opacity-20 border-2 border-red-600;
+        }
+        .day-motivation {
+            /* Frase Motivacional (Lunes - Click para ver) */
+            @apply bg-blue-700 bg-opacity-20 border-2 border-blue-600;
+        }
+        .day-evaluation {
+            /* Alerta de Evaluación (5 Nov) */
+            @apply bg-green-700 bg-opacity-20 border-2 border-green-600;
+        }
+        /* Estilo para los inputs guardados */
+        .saved-input {
+            transition: all 0.3s ease;
+        }
+        .saved-input:focus {
+            box-shadow: 0 0 0 3px rgba(229, 153, 2, 0.5);
+        }
+    </style>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Establecer nivel de log para depuración de Firestore
+        setLogLevel('debug');
+        
+        // --- Variables Globales y Firebase ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = 'loading'; // Estado inicial
+
+        // Debounce utility to prevent too many Firestore writes
+        let debounceTimer;
+        const debounce = (callback, time) => {
+            window.clearTimeout(debounceTimer);
+            debounceTimer = window.setTimeout(callback, time);
+        };
+        
+        // --- Configuración y Datos del Calendario (Mantenidos) ---
+        // Fechas del calendario: 06 de Octubre al 06 de Noviembre de 2025
+        const startDate = new Date('2025-10-06T00:00:00'); 
+        const endDate = new Date('2025-11-06T00:00:00');
+        const calendarGrid = document.getElementById('calendar-grid');
+        
+        // Almacena el estado de cada día { 'YYYY-MM-DD': 'check' | 'cross' | null }
+        window.dayStatus = {}; // Ahora se llenará desde Firestore
+
+        const MOTIVATION_PHRASES = {
+            'check': "¡Buen trabajo! 💪",
+            'cross': "Un paso a la vez. ¡Mañana lo logras! 🚀"
+        };
+        
+        const sundayReminders = [
+            'Refresco y alcohol 🚫', 'Frituras 🍟', 'Harinas refinadas 🥖', 'Dulces procesados 🍬',
+        ];
+        const mondayMotivations = [
+            'El cambio comienza en ti. ¡Sigue fuerte, guerrera! 💪', 'La consistencia de hoy es la fuerza de mañana. 🌟',
+            'Estás construyendo el cuerpo que mereces. ¡No te detengas! 🚧', 'Tu disciplina es tu mejor músculo. ¡Termina la semana con poder! ⚡',
+            'Cada paso cuenta. ¡Haz que este sea un inicio épico! 🏆' 
+        ];
+
+
+        // --- FIREBASE: Funciones de acceso a datos ---
+        
+        function getGoalDocRef() {
+            if (!db || !userId || userId === 'loading') return null;
+            // Ruta de datos privada por usuario (Metas y Calendario)
+            const docPath = `/artifacts/${appId}/users/${userId}/goals/user_data`;
+            return doc(db, docPath);
+        }
+        
+        // Función para guardar objetivo
+        window.saveGoal = function(fieldId) {
+            debounce(async () => {
+                const docRef = getGoalDocRef();
+                if (!docRef) {
+                    console.error("Firestore DB no está listo o falta el ID de usuario.");
+                    return;
+                }
+
+                const inputElement = document.getElementById(fieldId);
+                if (!inputElement) return;
+
+                const data = {};
+                // Guardar la meta específica
+                data[fieldId] = inputElement.value;
+
+                try {
+                    await setDoc(docRef, data, { merge: true });
+                    console.log(`Objetivo guardado: ${fieldId}`);
+                } catch (error) {
+                    console.error("Error al guardar objetivo:", error);
+                }
+            }, 1000); // 1 segundo de debounce
+        };
+
+        // NUEVA FUNCIÓN: Guardar el estado de un día específico del calendario
+        async function saveDayStatus(dateKey, newStatus) {
+            const docRef = getGoalDocRef();
+            if (!docRef) {
+                console.error("Firestore DB no está listo o falta el ID de usuario.");
+                return;
+            }
+
+            // Guardar el estado en el mapa 'dayStatus' dentro del documento de Firestore
+            const data = {
+                dayStatus: {
+                    [dateKey]: newStatus // Esto actualiza solo el día específico
+                }
+            };
+
+            try {
+                // Merge para no sobreescribir las metas de texto
+                await setDoc(docRef, data, { merge: true }); 
+                console.log(`Estado del día ${dateKey} guardado: ${newStatus}`);
+            } catch (error) {
+                console.error("Error al guardar estado del día:", error);
+            }
+        }
+
+
+        // Función para cargar todos los datos (Metas y Calendario) en tiempo real
+        function loadUserData() {
+            const docRef = getGoalDocRef();
+            if (!docRef) return;
+
+            // Escuchar cambios en tiempo real (onSnapshot)
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    console.log("Datos cargados:", data);
+                    
+                    // --- Cargar Metas (Inputs de texto) ---
+                    const goalGeneral = document.getElementById('goal-general');
+                    const goalMonthly = document.getElementById('goal-monthly');
+
+                    if (data['goal-general']) { goalGeneral.value = data['goal-general']; }
+                    if (data['goal-monthly']) { goalMonthly.value = data['goal-monthly']; }
+
+                    // --- Cargar Estado del Calendario ---
+                    if (data.dayStatus) {
+                        window.dayStatus = data.dayStatus;
+                        // Forzar la actualización visual de todos los días cargados
+                        Object.keys(window.dayStatus).forEach(key => {
+                            updateStatusView(key, window.dayStatus[key] || 'none');
+                        });
+                    }
+                } else {
+                    console.log("No se encontraron datos guardados.");
+                }
+            }, (error) => {
+                console.error("Error al escuchar datos:", error);
+            });
+        }
+        
+        function setupInputListeners() {
+            document.getElementById('goal-general').addEventListener('input', () => window.saveGoal('goal-general'));
+            document.getElementById('goal-monthly').addEventListener('input', () => window.saveGoal('goal-monthly'));
+        }
+
+        // --- CALENDAR LOGIC ---
+        
+        function getDateKey(date) {
+            return date.toISOString().substring(0, 10);
+        }
+
+        window.toggleDayStatus = function(dateKey) {
+            let currentStatus = window.dayStatus[dateKey] || 'none';
+            let newStatus;
+
+            if (currentStatus === 'none') {
+                newStatus = 'check';
+            } else if (currentStatus === 'check') {
+                newStatus = 'cross';
+            } else {
+                newStatus = 'none'; 
+            }
+
+            // 1. Actualizar estado local
+            window.dayStatus[dateKey] = newStatus === 'none' ? null : newStatus;
+            
+            // 2. Actualizar vista
+            updateStatusView(dateKey, newStatus);
+            
+            // 3. Guardar en Firestore (Nueva llamada)
+            saveDayStatus(dateKey, window.dayStatus[dateKey]);
+        }
+
+        function updateStatusView(dateKey, status) {
+            const statusIcon = document.getElementById(`status-icon-${dateKey}`);
+            const feedbackText = document.getElementById(`feedback-text-${dateKey}`);
+            const statusContainer = document.getElementById(`status-container-${dateKey}`);
+
+            if (!statusIcon || !feedbackText) return; 
+
+            let iconHtml = '🔘';
+            let phrase = 'Toca para registrar';
+
+            statusContainer.classList.remove('text-green-500', 'text-red-500', 'text-gray-500');
+
+            if (status === 'check') {
+                iconHtml = '✅';
+                phrase = MOTIVATION_PHRASES.check;
+                statusContainer.classList.add('text-green-500');
+            } else if (status === 'cross') {
+                iconHtml = '❌';
+                phrase = MOTIVATION_PHRASES.cross;
+                statusContainer.classList.add('text-red-500');
+            } else {
+                statusContainer.classList.add('text-gray-500');
+            }
+
+            statusIcon.textContent = iconHtml;
+            feedbackText.textContent = phrase;
+        }
+
+
+        function renderCalendar() {
+            let currentDate = new Date(startDate);
+            let reminderIndex = 0; 
+            let motivationIndex = 0; 
+            
+            if (!calendarGrid) return;
+            calendarGrid.innerHTML = ''; 
+
+            // Determinar cuántos días de relleno necesita la primera semana (para que el Lunes sea el primer día)
+            const startDayOfWeek = currentDate.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+            const leadingBlanks = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Si es domingo, son 6 espacios antes. Si es lunes, 0.
+            
+            // Rellenar espacios en blanco
+            for (let i = 0; i < leadingBlanks; i++) {
+                 // Clase 'invisible' para mantener la estructura de la cuadrícula
+                calendarGrid.innerHTML += '<div class="calendar-day bg-transparent border-none shadow-none cursor-default"></div>';
+            }
+
+
+            while (currentDate.getTime() <= endDate.getTime()) {
+                const dateKey = getDateKey(currentDate);
+                const day = currentDate.getDate();
+                // El mes es base 0, por lo que Noviembre (10) es el 10
+                const month = currentDate.getMonth(); 
+                const dayOfWeek = currentDate.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+                
+                let dayClasses = 'bg-gray-700 hover:bg-gray-600';
+                let content = `<span class="text-xl font-extrabold text-white">${day}</span>`;
+                let infoBlock = '';
+
+                // Obtener el estado actual (si se cargó desde Firestore, se usará aquí)
+                const currentStatus = window.dayStatus[dateKey] || 'none';
+                let statusIcon = '🔘';
+                let statusPhrase = 'Toca para registrar';
+                let statusColor = 'text-gray-500';
+
+                // Inicializar la vista con el estado cargado
+                if (currentStatus === 'check') {
+                    statusIcon = '✅';
+                    statusPhrase = MOTIVATION_PHRASES.check;
+                    statusColor = 'text-green-500';
+                } else if (currentStatus === 'cross') {
+                    statusIcon = '❌';
+                    statusPhrase = MOTIVATION_PHRASES.cross;
+                    statusColor = 'text-red-500';
+                }
+
+                // Lunes: Frase Motivacional (dayOfWeek === 1)
+                if (dayOfWeek === 1 && motivationIndex < mondayMotivations.length) {
+                    dayClasses = 'day-motivation hover:bg-blue-800/40';
+                    infoBlock = `
+                        <details class="text-center w-full mt-1">
+                            <summary class="font-bold text-infit-orange cursor-pointer hover:text-blue-300">Descubre tu frase</summary>
+                            <p class="italic text-blue-300 text-xs p-1">${mondayMotivations[motivationIndex]}</p>
+                        </details>`;
+                    motivationIndex++;
+                }
+
+                // Domingo: Reto de Eliminación (dayOfWeek === 0)
+                if (dayOfWeek === 0 && reminderIndex < sundayReminders.length) {
+                    dayClasses = 'day-reminder hover:bg-red-800/40';
+                    infoBlock = `
+                        <div class="mt-2 text-center">
+                            <p class="font-bold text-red-500 text-sm">Reto de Eliminación</p>
+                            <p class="font-semibold text-red-400 text-xs">${sundayReminders[reminderIndex]}</p>
+                        </div>
+                    `;
+                    reminderIndex++;
+                }
+
+                // Alerta de Evaluación (5 de Noviembre - mes 10)
+                if (month === 10 && day === 5) { 
+                    dayClasses = 'day-evaluation animate-pulse hover:bg-green-800/40';
+                    infoBlock = `<p class="font-bold text-lg text-green-400 text-center mt-2">¡EVALUACIÓN! 🎯</p><p class="text-xs text-green-300 text-center">Agenda tu cita para la próxima revisión.</p>`;
+                }
+                
+                // Estilo para fin de semana si no tiene evento especial
+                if ((dayOfWeek === 0 || dayOfWeek === 6) && infoBlock === '') {
+                    dayClasses = 'bg-gray-800 border border-gray-700 hover:bg-gray-700';
+                }
+
+                // Bloque de Seguimiento Diario (Paloma/Tache)
+                // Usamos 'flex-grow' en 'infoBlock' si existe, para empujar el trackingBlock hacia abajo.
+                const infoBlockClass = infoBlock ? 'flex-grow' : '';
+
+                const trackingBlock = `
+                    <div id="tracking-block-${dateKey}" onclick="toggleDayStatus('${dateKey}')" 
+                         class="mt-1 p-1 rounded-md bg-gray-900/50 hover:bg-gray-900 transition-colors duration-200">
+                        <div id="status-container-${dateKey}" class="flex flex-col items-center justify-center gap-0 font-bold ${statusColor}">
+                            <span id="status-icon-${dateKey}" class="text-xl leading-none">${statusIcon}</span>
+                            <span id="feedback-text-${dateKey}" class="text-[0.6rem] leading-tight">${statusPhrase}</span>
+                        </div>
+                    </div>
+                `;
+                
+                // Envuelve infoBlock en un div para manejar el layout flex-grow
+                const wrappedInfoBlock = infoBlock ? `<div class="${infoBlockClass}">${infoBlock}</div>` : '';
+
+
+                const monthName = currentDate.toLocaleDateString('es-ES', { month: 'short' });
+
+                const dayHtml = `
+                    <div class="calendar-day ${dayClasses} shadow-lg border border-gray-800">
+                        ${content}
+                        ${wrappedInfoBlock}
+                        ${trackingBlock} 
+                        <span class="text-[0.6rem] text-gray-500 self-end">${monthName.charAt(0).toUpperCase() + monthName.slice(1)}</span>
+                    </div>
+                `;
+                
+                calendarGrid.innerHTML += dayHtml;
+
+                currentDate.setDate(day + 1);
+            }
+        }
+
+        // --- FIREBASE INITIALIZATION ---
+        async function initApp() { 
+            // 1. Renderizar el calendario de inmediato.
+            renderCalendar(); 
+            
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                // Si la configuración falta, no podemos cargar ni guardar datos, pero la UI es visible.
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            
+                // 2. Autenticación (anónima o con token)
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase Initialization or Authentication failed:", error);
+                return;
+            }
+            
+            // 3. Esperar la confirmación del estado de autenticación
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    console.log("Authenticated with User ID:", userId);
+                    loadUserData(); // Cargar metas Y estado del calendario
+                    setupInputListeners(); // Adjuntar listeners de objetivos
+                } else {
+                    console.error("User is not signed in.");
+                    userId = 'anonymous'; 
+                }
+            });
+        }
+
+        // Ejecutar la función de inicialización
+        document.addEventListener('DOMContentLoaded', initApp); 
+
+    </script>
+</head>
+<body class="bg-[#1a1a1a] min-h-screen p-4 sm:p-8 flex flex-col items-center text-white">
+
+    <!-- Header -->
+    <header class="w-full max-w-6xl text-center mb-8">
+        <div class="mb-4">
+            <!-- LOGO INFIT: Usando la ruta relativa para GitHub -->
+            <img src="logo-infit.jpg" alt="Logotipo INFIT" class="w-20 h-20 mx-auto rounded-full object-cover bg-black p-1">
+            <h1 class="text-4xl font-extrabold text-white mb-1">MI CAMINO HACIA MI MEJOR VERSIÓN</h1>
+        </div>
+        <p class="text-xl text-infit-orange font-semibold mb-4">Adriana</p>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="w-full max-w-6xl bg-[#222222] p-6 rounded-3xl shadow-2xl border border-gray-700">
+
+        <!-- Sección de ACTUALIZACIÓN DE PROGRESO -->
+        <div class="w-full p-4 mb-8 bg-gray-900 rounded-xl border-l-4 border-infit-orange shadow-md">
+            <h3 class="text-lg font-bold text-white mb-3 flex items-center gap-2">
+                <span class="text-infit-orange">🔔</span> Actualización de tu progreso Adriana
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <p class="text-xs text-infit-orange font-semibold">Comenzaste con:</p>
+                    <p class="font-bold">⚖️ Peso: 83.75 kg | Grasa: 44.4% | Músculo: 42.2 kg</p>
+                </div>
+                <div class="bg-gray-800 p-3 rounded-lg">
+                    <p class="text-xs text-infit-orange font-semibold">Hoy tus nuevos datos son:</p>
+                    <p class="font-bold">⚖️ Peso: 76.90 kg | Grasa: 41.7% | Músculo: 53.1 kg</p>
+                </div>
+                <div class="bg-gray-800 p-3 rounded-lg col-span-1 md:col-span-1">
+                    <p class="text-xs text-infit-orange font-semibold">➡️ Progreso total:</p>
+                    <p class="font-bold text-green-400">Bajaste 6.85 kg de peso total y ganaste casi 11 kg de músculo. 👏🔥</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección de Metas y Progreso -->
+        <div class="w-full mb-10">
+            <h2 class="text-3xl font-bold text-white mb-4 border-b border-gray-700 pb-2">
+                <span class="text-infit-orange">🚀</span> TUS OBJETIVOS
+            </h2>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Tarjeta 1: Objetivo General (3-6 meses) -->
+                <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-infit-orange shadow-md">
+                    <label for="goal-general" class="text-lg font-bold text-infit-orange block mb-2">Objetivo General (3-6 meses)</label>
+                    <input type="text" id="goal-general" value="Ej: Ir a la playa con un 3% menos de grasa corporal." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: Bajar 10 kg, vacaciones, evento especial...">
+                </div>
+
+                <!-- Tarjeta 2: Objetivo del Mes (Realista) -->
+                <div class="bg-gray-800 p-6 rounded-xl border-l-4 border-infit-orange shadow-md">
+                    <label for="goal-monthly" class="text-lg font-bold text-infit-orange block mb-2">Meta del Mes (Sencilla y Realista)</label>
+                    <input type="text" id="goal-monthly" value="Ej: Beber 2.5 litros de agua diarios y dormir 7 horas." class="w-full bg-gray-900 text-gray-300 p-3 rounded-lg border border-gray-700 focus:outline-none focus:border-infit-orange saved-input" placeholder="Ej: No comer postre después de las 8pm, 3 litros de agua.">
+                </div>
+            </div>
+        </div>
+
+        <!-- Sugerencia L-Carnitina -->
+        <div class="w-full p-4 mb-8 bg-gray-900 rounded-xl border-l-4 border-gray-500 text-sm text-center italic">
+            <p>
+                <span class="text-infit-orange font-bold">Sugerencia INFIT:</span> Para potenciar tus resultados y la movilización de grasa, recuerda que cuentas con la opción de integrar <strong class="text-white">L-Carnitina</strong> a tu plan.
+            </p>
+        </div>
+
+        <!-- Calendario de Hábitos -->
+        <h2 class="text-3xl font-bold text-white mb-4 border-b border-gray-700 pb-2">
+            <span class="text-infit-orange">📅</span> CALENDARIO DE HÁBITOS (06 OCT - 06 NOV)
+        </h2>
+        
+        <div class="grid grid-cols-7 gap-1 text-center font-bold text-infit-orange mb-3 text-sm">
+            <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
+        </div>
+        
+        <div id="calendar-grid" class="grid grid-cols-7 gap-1">
+            <!-- Los días se insertarán aquí por JavaScript -->
+        </div>
+    </main>
+</body>
+</html>
