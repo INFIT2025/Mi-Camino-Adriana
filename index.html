@@ -34,7 +34,7 @@
             @apply bg-red-700 bg-opacity-20 border-2 border-red-600;
         }
         .day-motivation {
-            /* Frase Motivacional (Lunes - Click para ver) */
+            /* Frase Motivacional (Lunes - Sábado) */
             @apply bg-blue-700 bg-opacity-20 border-2 border-blue-600;
         }
         .day-evaluation {
@@ -72,7 +72,7 @@
         let debounceTimer;
         const debounce = (callback, time) => {
             window.clearTimeout(debounceTimer);
-            debounceTimer = window.setTimeout(callback, time);
+            window.setTimeout(callback, time);
         };
         
         // --- Configuración y Datos del Calendario (Mantenidos) ---
@@ -92,10 +92,29 @@
         const sundayReminders = [
             'Refresco y alcohol 🚫', 'Frituras 🍟', 'Harinas refinadas 🥖', 'Dulces procesados 🍬',
         ];
-        const mondayMotivations = [
-            'El cambio comienza en ti. ¡Sigue fuerte, guerrera! 💪', 'La consistencia de hoy es la fuerza de mañana. 🌟',
-            'Estás construyendo el cuerpo que mereces. ¡No te detengas! 🚧', 'Tu disciplina es tu mejor músculo. ¡Termina la semana con poder! ⚡',
-            'Cada paso cuenta. ¡Haz que este sea un inicio épico! 🏆' 
+        
+        // NUEVAS FRASES: Progresión por semana (4 semanas completas + inicio de la 5ta)
+        const WEEKLY_MOTIVATIONS = [
+            { 
+                title: 'Semana 1: Cimiento', 
+                phrase: 'El inicio es la mitad del camino. Establece tus bases con compromiso y enfoque diario. ¡Tú puedes!' 
+            },
+            { 
+                title: 'Semana 2: Consistencia', 
+                phrase: 'La fuerza no viene de lo que puedes hacer, sino de superar lo que creíste no poder. ¡Mantén el ritmo!' 
+            },
+            { 
+                title: 'Semana 3: Resultados', 
+                phrase: 'Siente la energía. Cada elección inteligente que haces ahora se transforma en tu bienestar futuro. ¡Ya lo estás logrando!' 
+            },
+            { 
+                title: 'Semana 4: Cierre', 
+                phrase: 'Eres imparable. Utiliza la disciplina de estas semanas para prepararte para tu próxima gran meta y evaluación.' 
+            },
+            { 
+                title: 'Semana 5: Visión', 
+                phrase: 'Tu mejor versión es un proceso continuo. Mira hacia adelante y planifica el siguiente paso.' 
+            }
         ];
 
 
@@ -138,7 +157,7 @@
             const docRef = getGoalDocRef();
             if (!docRef) {
                 console.error("Firestore DB no está listo o falta el ID de usuario.");
-                return;
+                    return;
             }
 
             // Guardar el estado en el mapa 'dayStatus' dentro del documento de Firestore
@@ -257,20 +276,29 @@
         function renderCalendar() {
             let currentDate = new Date(startDate);
             let reminderIndex = 0; 
-            let motivationIndex = 0; 
             
             if (!calendarGrid) return;
             calendarGrid.innerHTML = ''; 
-
-            // Determinar cuántos días de relleno necesita la primera semana (para que el Lunes sea el primer día)
-            const startDayOfWeek = currentDate.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
-            const leadingBlanks = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Si es domingo, son 6 espacios antes. Si es lunes, 0.
             
-            // Rellenar espacios en blanco
-            for (let i = 0; i < leadingBlanks; i++) {
-                 // Clase 'invisible' para mantener la estructura de la cuadrícula
-                calendarGrid.innerHTML += '<div class="calendar-day bg-transparent border-none shadow-none cursor-default"></div>';
+            let weeklyMotivationIndex = 0; // Inicia el contador de semanas para las frases
+
+            // --- Prepending Blanks (Ajustado para la cuadrícula de 8 columnas) ---
+            const startDayOfWeek = currentDate.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+            // leadingBlanks cuenta cuántos días antes de Lun (1) hay en la primera fila.
+            // Si el día de inicio es Lunes (1), no hay relleno (1-1=0). Si es Jueves (4), hay 3 rellenos (4-1=3).
+            // Si es Domingo (0), se necesitan 6 rellenos para llegar a Lun(1) de la siguiente semana.
+            const leadingBlanks = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; 
+            
+            if (leadingBlanks > 0) {
+                 // Relleno para la Columna de Motivación (Col 1) de la primera fila.
+                 calendarGrid.innerHTML += '<div class="calendar-day bg-transparent border-none shadow-none cursor-default"></div>'; 
+                 
+                 // Relleno para los días de la semana (Col 2 en adelante)
+                 for (let i = 0; i < leadingBlanks; i++) {
+                      calendarGrid.innerHTML += '<div class="calendar-day bg-transparent border-none shadow-none cursor-default"></div>';
+                 }
             }
+            // --- Fin Prepending Blanks ---
 
 
             while (currentDate.getTime() <= endDate.getTime()) {
@@ -301,42 +329,63 @@
                     statusColor = 'text-red-500';
                 }
 
-                // Lunes: Frase Motivacional (dayOfWeek === 1)
-                if (dayOfWeek === 1 && motivationIndex < mondayMotivations.length) {
-                    dayClasses = 'day-motivation hover:bg-blue-800/40';
-                    infoBlock = `
-                        <details class="text-center w-full mt-1">
-                            <summary class="font-bold text-infit-orange cursor-pointer hover:text-blue-300">Descubre tu frase</summary>
-                            <p class="italic text-blue-300 text-xs p-1">${mondayMotivations[motivationIndex]}</p>
-                        </details>`;
-                    motivationIndex++;
-                }
+                
+                // --- 1. COLUMNA DE MOTIVACIÓN SEMANAL (COLUMNA 1 - Solo se inserta los LUNES) ---
+                // Cuando es Lunes, insertamos la celda de Motivación que irá en la primera columna de la nueva fila.
+                if (dayOfWeek === 1) { 
+                    // Obtener el objeto de frase para la semana actual, usando la última como default
+                    const motivationData = WEEKLY_MOTIVATIONS[weeklyMotivationIndex] || WEEKLY_MOTIVATIONS[WEEKLY_MOTIVATIONS.length - 1];
 
-                // Domingo: Reto de Eliminación (dayOfWeek === 0)
-                if (dayOfWeek === 0 && reminderIndex < sundayReminders.length) {
-                    dayClasses = 'day-reminder hover:bg-red-800/40';
-                    infoBlock = `
-                        <div class="mt-2 text-center">
-                            <p class="font-bold text-red-500 text-sm">Reto de Eliminación</p>
-                            <p class="font-semibold text-red-400 text-xs">${sundayReminders[reminderIndex]}</p>
+                    const motivationCell = `
+                        <!-- Columna de Foco Semanal: se inserta en Lunes -->
+                        <div class="calendar-day day-motivation bg-blue-900/40 border-r-2 border-infit-orange/50 shadow-inner col-span-1 p-2">
+                            <span class="text-xs font-semibold text-infit-orange uppercase mb-1 block">${motivationData.title}</span>
+                            <details class="text-center w-full mt-1 flex-grow flex flex-col justify-center">
+                                <summary class="font-bold text-white text-xs sm:text-sm cursor-pointer hover:text-blue-300 p-1 leading-tight">
+                                    Click para leer tu Foco Semanal
+                                </summary>
+                                <p class="italic text-blue-300 text-[0.6rem] sm:text-xs p-1">${motivationData.phrase}</p>
+                            </details>
                         </div>
                     `;
-                    reminderIndex++;
+                    calendarGrid.innerHTML += motivationCell;
+                    
+                    // Incrementamos el índice para la próxima semana (que empezará el siguiente Lunes)
+                    weeklyMotivationIndex++;
+                }
+                
+                // --- 2. DÍA ESPECÍFICO (COLUMNA 2 a 8) ---
+                
+                // LUNES a SÁBADO: Se aplica el estilo de motivación.
+                if (dayOfWeek !== 0) {
+                    dayClasses = 'day-motivation hover:bg-blue-800/40';
+                    // Nota: Se ha eliminado el infoBlock de frase de aquí, pues ahora está en la columna 1.
                 }
 
-                // Alerta de Evaluación (5 de Noviembre - mes 10)
+                // DOMINGO: Reto de Eliminación (dayOfWeek === 0)
+                if (dayOfWeek === 0) {
+                    if (reminderIndex < sundayReminders.length) {
+                        dayClasses = 'day-reminder hover:bg-red-800/40';
+                        infoBlock = `
+                            <div class="mt-2 text-center">
+                                <p class="font-bold text-red-500 text-sm">Reto de Eliminación</p>
+                                <p class="font-semibold text-red-400 text-xs">${sundayReminders[reminderIndex]}</p>
+                            </div>
+                        `;
+                        reminderIndex++;
+                    } else {
+                        // Domingo sin evento especial
+                        dayClasses = 'bg-gray-800 border border-gray-700 hover:bg-gray-700';
+                    }
+                }
+                
+                // ALERTA DE EVALUACIÓN (5 de Noviembre) (PRIORIDAD ALTA)
                 if (month === 10 && day === 5) { 
                     dayClasses = 'day-evaluation animate-pulse hover:bg-green-800/40';
                     infoBlock = `<p class="font-bold text-lg text-green-400 text-center mt-2">¡EVALUACIÓN! 🎯</p><p class="text-xs text-green-300 text-center">Agenda tu cita para la próxima revisión.</p>`;
                 }
                 
-                // Estilo para fin de semana si no tiene evento especial
-                if ((dayOfWeek === 0 || dayOfWeek === 6) && infoBlock === '') {
-                    dayClasses = 'bg-gray-800 border border-gray-700 hover:bg-gray-700';
-                }
-
                 // Bloque de Seguimiento Diario (Paloma/Tache)
-                // Usamos 'flex-grow' en 'infoBlock' si existe, para empujar el trackingBlock hacia abajo.
                 const infoBlockClass = infoBlock ? 'flex-grow' : '';
 
                 const trackingBlock = `
@@ -377,7 +426,6 @@
             
             if (!firebaseConfig) {
                 console.error("Firebase config is missing.");
-                // Si la configuración falta, no podemos cargar ni guardar datos, pero la UI es visible.
                 return;
             }
 
@@ -478,17 +526,45 @@
                 <span class="text-infit-orange font-bold">Sugerencia INFIT:</span> Para potenciar tus resultados y la movilización de grasa, recuerda que cuentas con la opción de integrar <strong class="text-white">L-Carnitina</strong> a tu plan.
             </p>
         </div>
+        
+        <!-- Sección de INVITACIÓN / REFERIDOS (ACTUALIZADO PARA WHATSAPP) -->
+        <div class="w-full p-6 mb-10 bg-gray-900 rounded-xl border-l-8 border-infit-orange shadow-lg">
+            <h3 class="text-2xl font-bold text-infit-orange mb-3 flex items-center gap-3">
+                <!-- Icono de Usuarios (Lucide Users-2) -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-users-2"><path d="M14 19a6 6 0 0 0-12 0"/><circle cx="8" cy="10" r="4"/><path d="M22 19a6 6 0 0 0-6-6 4 4 0 1 0 0-8"/></svg>
+                ¡Inspira a alguien más!
+            </h3>
+            <p class="text-gray-300 mb-4 text-sm">
+                <!-- TEXTO ACTUALIZADO AQUÍ -->
+                Invita a un amigo o familiar a unirse al programa <strong>"Mi Mejor Versión"</strong> (Planes + L-Carnitina) y <strong>ambos obtengan beneficios especiales 🎁</strong>.
+            </p>
+            <div class="bg-gray-800 p-4 rounded-lg mb-4">
+                <p class="font-semibold text-white mb-2">¿Quién puede unirse?</p>
+                <p class="text-xs text-gray-400">
+                    Personas de nuestra comunidad en <strong>Santa Ana</strong> o en cualquier parte de <strong>Estados Unidos</strong>. ¡Que tu impacto no tenga límites!
+                </p>
+            </div>
+            <!-- Botón de Acción - Usa enlace de WhatsApp precargado (MENSAJE ACTUALIZADO) -->
+            <a href="https://wa.me/5217751056744?text=Hola%20%F0%9F%91%8B%2C%20soy%20Adriana.%20%0A%0AQuiero%20recomendar%20a%20un%20amigo%2Ffamiliar%20para%20el%20programa%0A%22Mi%20Mejor%20Versi%C3%B3n%22%20%0Ay%20obtener%20los%20beneficios%20%F0%9F%8E%81.%0A%0A%F0%9F%93%B2Este%20es%20su%20nombre%20y%20n%C3%BAmero%0Ade%20contacto%20para%20que%20reciba%20la%20info%3A" 
+               target="_blank" 
+               class="mt-2 inline-block w-full text-center py-3 px-6 rounded-xl font-bold text-gray-900 bg-infit-orange hover:bg-yellow-600 transition duration-300 transform hover:scale-[1.01] shadow-lg">
+                ¡Quiero recomendar a un amigo por WhatsApp! 📲
+            </a>
+            <p class="text-center text-xs text-gray-500 mt-2">Al hacer click se abrirá WhatsApp con un mensaje pre-escrito para iniciar la recomendación.</p>
+        </div>
 
         <!-- Calendario de Hábitos -->
         <h2 class="text-3xl font-bold text-white mb-4 border-b border-gray-700 pb-2">
             <span class="text-infit-orange">📅</span> CALENDARIO DE HÁBITOS (06 OCT - 06 NOV)
         </h2>
         
-        <div class="grid grid-cols-7 gap-1 text-center font-bold text-infit-orange mb-3 text-sm">
-            <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
+        <!-- Nuevo Header de 8 Columnas -->
+        <div class="grid grid-cols-8 gap-1 text-center font-bold text-infit-orange mb-3 text-sm">
+            <span>Foco Semanal</span><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
         </div>
         
-        <div id="calendar-grid" class="grid grid-cols-7 gap-1">
+        <!-- Nueva Grid de 8 Columnas -->
+        <div id="calendar-grid" class="grid grid-cols-8 gap-1">
             <!-- Los días se insertarán aquí por JavaScript -->
         </div>
     </main>
